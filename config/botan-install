@@ -1,0 +1,56 @@
+
+   1. Remove USB
+   2. Reboot: \Zbreboot\Zn
+   3. Login as $USERNAME
+
+\Zb$msg_help\Zn
+   • $msg_project: $PROJECT_URL
+   • $msg_discord: $DISCORD_URL
+   • $msg_bugreport: $BUG_REPORT_URL
+
+\Z2🌿 Botan Linux - Power, Speed, Freedom\Zn
+
+" 28 80
+
+    # Unmount
+    umount -R /mnt 2>/dev/null || true
+
+    # Ask for reboot
+    $DIALOG --title "$msg_reboot" \
+            --backtitle "Botan Linux - Hardcore Distribution" \
+            --yesno "\n\Zb$msg_reboot_msg\Zn\n\Z3⚠️  Make sure to remove the USB!\Zn" 10 55 && {
+        clear
+        echo -e "${G}${B}🌿 Welcome to Botan Linux!${W}"
+        reboot
+    }
+
+    clear
+    print_color "$G$B" "🌿 Botan Linux Installer finished."
+    print_color "$C" "   To reboot: reboot"
+}
+
+# --- MAIN ---
+
+main() {
+    check_root
+    check_dialog
+
+    # İLK ÖNCE DİL SEÇİMİ - Tüm sistem bu dilde olacak
+    step_select_language
+    
+    # Run installation steps
+    step_welcome
+    step_keyboard
+    step_location
+    step_users
+    step_desktop
+    step_disk_partition
+    step_extra_packages
+    step_network
+    step_summary
+    step_install
+    step_finish
+}
+
+# Run main
+main
