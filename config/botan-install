@@ -1,4 +1,1110 @@
+#!/bin/bash
+#===============================================================================
+#  🌿 BOTAN LINUX - TUI Installer
+#  Hardcore Linux Distribution Installer
+#===============================================================================
 
+# --- LİNKLER ---
+PROJECT_URL="https://botan-linux.github.io/Botan-sprout/"
+DISCORD_URL="https://discord.gg/xRf6JqPjWr"
+BUG_REPORT_URL="https://github.com/Botan-linux/Botan-sprout/issues"
+
+set -e
+
+# --- COLORS ---
+G="\e[32m"    # Green - Botan primary
+C="\e[36m"    # Cyan
+B="\e[1m"     # Bold
+W="\e[0m"     # Reset
+R="\e[31m"    # Red
+Y="\e[33m"    # Yellow
+M="\e[35m"    # Magenta
+
+# --- CONFIGURATION ---
+CONFIG_URL="https://raw.githubusercontent.com/Botan-linux/botan-file/main/config"
+FILE_URL="https://raw.githubusercontent.com/Botan-linux/botan-file/main/botan-file"
+
+# --- GLOBAL VARIABLES ---
+USERNAME=""
+USER_PASS=""
+ROOT_PASS=""
+HOST_NAME=""
+TARGET_DISK=""
+TARGET_PART=""
+KEYBOARD_LAYOUT="tr"
+KEYBOARD_VARIANT=""
+TIMEZONE="Europe/Istanbul"
+LOCALE="tr_TR.UTF-8"
+LANGUAGE="tr"
+INSTALLER_LANG="tr"  # Installer dili
+DESKTOP_ENV=""
+EXTRA_PACKAGES=""
+SWAP_SIZE=""
+SWAP_FILE=""
+
+# USB Live sistem yolları
+USB_ROOT="/run/archiso/sfs/airootfs"
+USB_BOOT="/run/archiso/bootmnt"
+
+# --- DİL MESAJLARI ---
+# Türkçe mesajlar
+MSG_TR_WELCOME="Hoş Geldiniz"
+MSG_TR_START="Kuruluma Başla"
+MSG_TR_KEYBOARD="Klavye Düzeni"
+MSG_TR_LANG_LOCATION="Dil ve Konum"
+MSG_TR_USERS="Kullanıcı Ayarları"
+MSG_TR_DESKTOP="Masaüstü Ortamı"
+MSG_TR_DISK="Disk Bölümleme"
+MSG_TR_PACKAGES="Ek Paketler"
+MSG_TR_SUMMARY="Özet ve Onay"
+MSG_TR_INSTALL="Kurulum"
+MSG_TR_FINISH="Tamamlandı"
+MSG_TR_ERROR="Hata"
+MSG_TR_SUCCESS="Başarılı"
+MSG_TR_YES="Evet"
+MSG_TR_NO="Hayır"
+MSG_TR_OK="Tamam"
+MSG_TR_CANCEL="İptal"
+MSG_TR_BACK="Geri"
+MSG_TR_NEXT="İleri"
+MSG_TR_FINISH_BTN="Bitti"
+MSG_TR_PROJECT="Proje Kaynak Kodu"
+MSG_TR_DISCORD="Discord Sunucumuz"
+MSG_TR_BUGREPORT="Hata Bildir"
+
+# English messages
+MSG_EN_WELCOME="Welcome"
+MSG_EN_START="Start Installation"
+MSG_EN_KEYBOARD="Keyboard Layout"
+MSG_EN_LANG_LOCATION="Language & Location"
+MSG_EN_USERS="User Settings"
+MSG_EN_DESKTOP="Desktop Environment"
+MSG_EN_DISK="Disk Partitioning"
+MSG_EN_PACKAGES="Additional Packages"
+MSG_EN_SUMMARY="Summary & Confirm"
+MSG_EN_INSTALL="Installation"
+MSG_EN_FINISH="Completed"
+MSG_EN_ERROR="Error"
+MSG_EN_SUCCESS="Success"
+MSG_EN_YES="Yes"
+MSG_EN_NO="No"
+MSG_EN_OK="OK"
+MSG_EN_CANCEL="Cancel"
+MSG_EN_BACK="Back"
+MSG_EN_NEXT="Next"
+MSG_EN_FINISH_BTN="Finish"
+MSG_EN_PROJECT="Project Source Code"
+MSG_EN_DISCORD="Discord Server"
+MSG_EN_BUGREPORT="Report a Bug"
+
+# Deutsch Nachrichten
+MSG_DE_WELCOME="Willkommen"
+MSG_DE_START="Installation starten"
+MSG_DE_KEYBOARD="Tastaturlayout"
+MSG_DE_LANG_LOCATION="Sprache & Ort"
+MSG_DE_USERS="Benutzereinstellungen"
+MSG_DE_DESKTOP="Desktop-Umgebung"
+MSG_DE_DISK="Festplattenpartitionierung"
+MSG_DE_PACKAGES="Zusätzliche Pakete"
+MSG_DE_SUMMARY="Zusammenfassung"
+MSG_DE_INSTALL="Installation"
+MSG_DE_FINISH="Fertig"
+MSG_DE_ERROR="Fehler"
+MSG_DE_SUCCESS="Erfolg"
+MSG_DE_YES="Ja"
+MSG_DE_NO="Nein"
+MSG_DE_OK="OK"
+MSG_DE_CANCEL="Abbrechen"
+MSG_DE_BACK="Zurück"
+MSG_DE_NEXT="Weiter"
+MSG_DE_FINISH_BTN="Fertig"
+MSG_DE_PROJECT="Projektquellcode"
+MSG_DE_DISCORD="Discord Server"
+MSG_DE_BUGREPORT="Fehler melden"
+
+# --- DIALOG SETUP ---
+DIALOG=${DIALOG=dialog}
+TEMPFILE=$(mktemp)
+
+# --- UTILITY FUNCTIONS ---
+
+print_color() {
+    echo -e "${1}${2}${W}"
+}
+
+error_exit() {
+    $DIALOG --title "❌ Hata" \
+            --backtitle "Botan Linux - Hardcore Distribution" \
+            --colors \
+            --msgbox "\n\Z1$1\Zn" 10 60
+    clear
+    exit 1
+}
+
+success_msg() {
+    $DIALOG --title "✅ Başarılı" \
+            --backtitle "Botan Linux - Hardcore Distribution" \
+            --colors \
+            --msgbox "\n\Z2$1\Zn" 10 60
+}
+
+check_root() {
+    if [ "$EUID" -ne 0 ]; then
+        echo "Bu script root olarak çalıştırılmalıdır!"
+        echo "Kullanım: sudo ./botan-installer.sh"
+        exit 1
+    fi
+}
+
+check_dialog() {
+    if ! command -v dialog &> /dev/null; then
+        echo "dialog kuruluyor..."
+        pacman -Sy --noconfirm dialog 2>/dev/null || {
+            echo "dialog kurulamadı. Lütfen manuel olarak kurun:"
+            echo "pacman -S dialog"
+            exit 1
+        }
+    fi
+}
+
+# --- DİL FONKSİYONU ---
+# Mesajları seçilen dile göre getir
+msg() {
+    local key="$1"
+    local var_name="MSG_${INSTALLER_LANG^^}_$key"
+    echo "${!var_name}"
+}
+
+# --- STEP 0: DİL SEÇİMİ ---
+step_select_language() {
+    INSTALLER_LANG=$($DIALOG --stdout \
+        --title "🌐 Select Language / Dil Seçiniz" \
+        --backtitle "Botan Linux Installer" \
+        --menu "\nSelect installer language / Kurulum dilini seçin:" 15 55 4 \
+        "tr" "🇹🇷 Türkçe" \
+        "en" "🇬🇧 English" \
+        "de" "🇩🇪 Deutsch") || exit 1
+    
+    # Set system language same as installer
+    LANGUAGE="$INSTALLER_LANG"
+    case $INSTALLER_LANG in
+        tr) LOCALE="tr_TR.UTF-8" ;;
+        en) LOCALE="en_US.UTF-8" ;;
+        de) LOCALE="de_DE.UTF-8" ;;
+    esac
+    KEYBOARD_LAYOUT="$INSTALLER_LANG"
+}
+
+# --- STEP 1: WELCOME ---
+
+step_welcome() {
+    local welcome_text=""
+    case $INSTALLER_LANG in
+        tr)
+            welcome_text="\ZbBu kurulum programı Botan Linux'u bilgisayarınıza\nkurmanıza yardımcı olacaktır.\Zn\n\Zb📋 Kurulum Adımları:\Zn\n   1. ⌨️  Klavye Düzeni\n   2. 🌐 Dil ve Konum  \n   3. 👤 Kullanıcı Ayarları\n   4. 🖥️  Masaüstü Ortamı\n   5. 💾 Disk Bölümleme\n   6. 📦 Ek Paketler (Opsiyonel)\n   7. 📋 Özet ve Onay\n   8. 🚀 Kurulum\n\n\Z1⚠️  ÖNEMLİ UYARI:\Zn\n\Z3   • Kurulum başladığında seçilen disk üzerindeki\Zn\n\Z3     tüm veriler kalıcı olarak silinecektir!\Zn\n\Z3   • Kurulum öncesinde önemli verilerinizi\Zn\n\Z3     yedeklediğinizden emin olun.\Zn"
+            ;;
+        en)
+            welcome_text="\ZbThis installer will help you install Botan Linux\non your computer.\Zn\n\Zb📋 Installation Steps:\Zn\n   1. ⌨️  Keyboard Layout\n   2. 🌐 Language & Location\n   3. 👤 User Settings\n   4. 🖥️  Desktop Environment\n   5. 💾 Disk Partitioning\n   6. 📦 Additional Packages (Optional)\n   7. 📋 Summary & Confirm\n   8. 🚀 Installation\n\n\Z1⚠️  IMPORTANT WARNING:\Zn\n\Z3   • All data on the selected disk will be\Zn\n\Z3     permanently deleted!\Zn\n\Z3   • Make sure to backup important data\Zn\n\Z3     before proceeding.\Zn"
+            ;;
+        de)
+            welcome_text="\ZbDieses Installationsprogramm hilft Ihnen, Botan Linux\nauf Ihrem Computer zu installieren.\Zn\n\Zb📋 Installationsschritte:\Zn\n   1. ⌨️  Tastaturlayout\n   2. 🌐 Sprache & Ort\n   3. 👤 Benutzereinstellungen\n   4. 🖥️  Desktop-Umgebung\n   5. 💾 Festplattenpartitionierung\n   6. 📦 Zusätzliche Pakete (Optional)\n   7. 📋 Zusammenfassung\n   8. 🚀 Installation\n\n\Z1⚠️  WICHTIGE WARNUNG:\Zn\n\Z3   • Alle Daten auf der ausgewählten Festplatte\Zn\n\Z3     werden dauerhaft gelöscht!\Zn\n\Z3   • Sichern Sie wichtige Daten vor dem Fortfahren.\Zn"
+            ;;
+    esac
+    
+    $DIALOG --title "🌿 $(msg WELCOME)" \
+            --backtitle "Botan Linux - Hardcore Distribution" \
+            --colors \
+            --ok-label "🚀 $(msg START)" \
+            --msgbox "
+\Zb\Z2  ╔═══════════════════════════════════════════════════╗
+  ║                                                    ║
+  ║     🌿  BOTAN LINUX INSTALLER  🌿                 ║
+  ║     Hardcore Linux Distribution                    ║
+  ║                                                    ║
+  ╚═══════════════════════════════════════════════════╝\Zn
+
+$welcome_text
+\Z2🌿 Botan Linux - Power, Speed, Freedom\Zn
+
+" 28 78
+}
+
+# --- STEP 2: KEYBOARD LAYOUT ---
+
+step_keyboard() {
+    # Keyboard layout selection
+    local layouts=$($DIALOG --stdout \
+        --title "⌨️ Klavye Düzeni" \
+        --backtitle "Botan Linux - Hardcore Distribution" \
+        --menu "\nKlavye düzeninizi seçin:" 20 60 12 \
+        "tr" "🇹🇷 Türkçe" \
+        "en" "🇬🇧 English (US)" \
+        "de" "🇩🇪 Deutsch" \
+        "fr" "🇫🇷 Français" \
+        "es" "🇪🇸 Español" \
+        "it" "🇮🇹 Italiano" \
+        "ru" "🇷🇺 Русский" \
+        "ar" "🇸🇦 العربية" \
+        "pl" "🇵🇱 Polski" \
+        "pt" "🇵🇹 Português" \
+        "cn" "🇨🇳 中文" \
+        "jp" "🇯🇵 日本語") || exit 1
+    
+    KEYBOARD_LAYOUT="$layouts"
+
+    # Variant selection for Turkish keyboard
+    if [ "$KEYBOARD_LAYOUT" = "tr" ]; then
+        KEYBOARD_VARIANT=$($DIALOG --stdout \
+            --title "⌨️ Klavye Varyantı" \
+            --backtitle "Botan Linux - Hardcore Distribution" \
+            --menu "\nTürkçe klavye varyantını seçin:" 15 55 4 \
+            "" "Türkçe Q (Varsayılan)" \
+            "trf" "Türkçe F" \
+            "intl" "Uluslararası") || KEYBOARD_VARIANT=""
+    fi
+
+    # Keyboard test
+    local test_input
+    test_input=$($DIALOG --stdout \
+        --title "⌨️ Klavye Testi" \
+        --backtitle "Botan Linux - Hardcore Distribution" \
+        --inputbox "\nKlavyenizi test etmek için bir şeyler yazın:\n(Devam etmek için Tamam'a basın)" 12 65) 2>/dev/null || true
+
+    success_msg "Klavye düzeni ayarlandı:\n$KEYBOARD_LAYOUT $KEYBOARD_VARIANT"
+}
+
+# --- STEP 3: LOCATION (Timezone only - dil zaten seçildi) ---
+
+step_location() {
+    local region_title timezone_title select_msg
+    case $INSTALLER_LANG in
+        tr)
+            region_title="🌍 Bölge Seçimi"
+            timezone_title="🕐 Saat Dilimi"
+            select_msg="\nBölgenizi seçin:"
+            ;;
+        en)
+            region_title="🌍 Region Selection"
+            timezone_title="🕐 Timezone"
+            select_msg="\nSelect your region:"
+            ;;
+        de)
+            region_title="🌍 Regionsauswahl"
+            timezone_title="🕐 Zeitzone"
+            select_msg="\nWählen Sie Ihre Region:"
+            ;;
+    esac
+
+    # Region selection
+    local region=$($DIALOG --stdout \
+        --title "$region_title" \
+        --backtitle "Botan Linux - Hardcore Distribution" \
+        --menu "$select_msg" 15 55 6 \
+        "Europe" "Europe" \
+        "Asia" "Asia" \
+        "America" "America" \
+        "Africa" "Africa" \
+        "Australia" "Oceania" \
+        "Pacific" "Pacific") || exit 1
+
+    # City/Timezone selection
+    local cities=""
+    case $region in
+        Europe)   cities="Istanbul London Berlin Paris Rome Madrid Amsterdam" ;;
+        Asia)     cities="Istanbul Tokyo Seoul Singapore Dubai Mumbai" ;;
+        America)  cities="New_York Los_Angeles Chicago Toronto Mexico_City" ;;
+        Africa)   cities="Cairo Lagos Johannesburg Nairobi" ;;
+        Australia) cities="Sydney Melbourne Brisbane Perth" ;;
+        Pacific)  cities="Auckland Wellington Honolulu" ;;
+    esac
+
+    TIMEZONE=$($DIALOG --stdout \
+        --title "$timezone_title" \
+        --backtitle "Botan Linux - Hardcore Distribution" \
+        --menu "\nSelect city:" 15 55 6 $cities) || exit 1
+    
+    TIMEZONE="$region/$TIMEZONE"
+}
+
+# --- STEP 4: USER SETTINGS ---
+
+step_users() {
+    local title_user title_pass title_pass2 title_root title_root2 title_host
+    local msg_user msg_pass msg_host err_user err_pass
+    
+    case $INSTALLER_LANG in
+        tr)
+            title_user="👤 Kullanıcı Adı"; msg_user="\nKullanıcı adınızı girin:\n(Küçük harf, boşluksuz, en az 3 karakter)"
+            title_pass="🔑 Kullanıcı Şifresi"; msg_pass="\nŞifre girin: (En az 4 karakter)"
+            title_pass2="🔑 Şifre Tekrar"; msg_pass2="\nŞifreyi tekrar girin:"
+            title_root="🔐 Root Şifresi"; msg_root="\nRoot şifresini girin:"
+            title_root2="🔐 Root Şifre Tekrar"; msg_root2="\nRoot şifresini tekrar girin:"
+            title_host="🖥️ Makine Adı"; msg_host="\nBilgisayarınızın adını girin:"
+            err_user="Geçersiz kullanıcı adı! En az 3 karakter, küçük harfle başlamalı."
+            err_pass="Şifreler eşleşmiyor veya çok kısa!"
+            ;;
+        en)
+            title_user="👤 Username"; msg_user="\nEnter username:\n(Lowercase, no spaces, min 3 chars)"
+            title_pass="🔑 User Password"; msg_pass="\nEnter password: (min 4 chars)"
+            title_pass2="🔑 Confirm Password"; msg_pass2="\nConfirm password:"
+            title_root="🔐 Root Password"; msg_root="\nEnter root password:"
+            title_root2="🔐 Confirm Root Password"; msg_root2="\nConfirm root password:"
+            title_host="🖥️ Hostname"; msg_host="\nEnter computer name:"
+            err_user="Invalid username! Min 3 chars, must start with lowercase."
+            err_pass="Passwords don't match or too short!"
+            ;;
+        de)
+            title_user="👤 Benutzername"; msg_user="\nBenutzername eingeben:\n(Kleinbuchstaben, keine Leerzeichen, min 3 Zeichen)"
+            title_pass="🔑 Benutzerpasswort"; msg_pass="\nPasswort eingeben: (min 4 Zeichen)"
+            title_pass2="🔑 Passwort bestätigen"; msg_pass2="\nPasswort bestätigen:"
+            title_root="🔐 Root-Passwort"; msg_root="\nRoot-Passwort eingeben:"
+            title_root2="🔐 Root-Passwort bestätigen"; msg_root2="\nRoot-Passwort bestätigen:"
+            title_host="🖥️ Hostname"; msg_host="\nComputername eingeben:"
+            err_user="Ungültiger Benutzername! Min 3 Zeichen, muss mit Kleinbuchstaben beginnen."
+            err_pass="Passwörter stimmen nicht überein oder zu kurz!"
+            ;;
+    esac
+
+    # Username
+    while true; do
+        USERNAME=$($DIALOG --stdout \
+            --title "$title_user" \
+            --backtitle "Botan Linux - Hardcore Distribution" \
+            --inputbox "$msg_user" 12 65) || exit 1
+        
+        if [[ "$USERNAME" =~ ^[a-z][a-z0-9_-]*$ ]] && [ ${#USERNAME} -ge 3 ]; then
+            break
+        else
+            $DIALOG --title "❌ $(msg ERROR)" --msgbox "\n$err_user" 10 50
+        fi
+    done
+
+    # User password
+    while true; do
+        local pass1=$($DIALOG --stdout \
+            --title "$title_pass" \
+            --backtitle "Botan Linux - Hardcore Distribution" \
+            --passwordbox "$msg_pass" 11 65) || exit 1
+        
+        local pass2=$($DIALOG --stdout \
+            --title "$title_pass2" \
+            --backtitle "Botan Linux - Hardcore Distribution" \
+            --passwordbox "$msg_pass2" 11 65) || exit 1
+        
+        if [ "$pass1" = "$pass2" ] && [ ${#pass1} -ge 4 ]; then
+            USER_PASS="$pass1"
+            break
+        else
+            $DIALOG --title "❌ $(msg ERROR)" --msgbox "\n$err_pass" 10 50
+        fi
+    done
+
+    # Root password
+    while true; do
+        local rpass1=$($DIALOG --stdout \
+            --title "$title_root" \
+            --backtitle "Botan Linux - Hardcore Distribution" \
+            --passwordbox "$msg_root" 11 65) || exit 1
+        
+        local rpass2=$($DIALOG --stdout \
+            --title "$title_root2" \
+            --backtitle "Botan Linux - Hardcore Distribution" \
+            --passwordbox "$msg_root2" 11 65) || exit 1
+        
+        if [ "$rpass1" = "$rpass2" ] && [ ${#rpass1} -ge 4 ]; then
+            ROOT_PASS="$rpass1"
+            break
+        else
+            $DIALOG --title "❌ $(msg ERROR)" --msgbox "\n$err_pass" 10 50
+        fi
+    done
+
+    # Hostname
+    while true; do
+        HOST_NAME=$($DIALOG --stdout \
+            --title "$title_host" \
+            --backtitle "Botan Linux - Hardcore Distribution" \
+            --inputbox "$msg_host" 11 65 "botan-pc") || exit 1
+        
+        if [[ "$HOST_NAME" =~ ^[a-z][a-z0-9-]*$ ]]; then
+            break
+        fi
+    done
+}
+
+# --- STEP 5: DESKTOP ENVIRONMENT ---
+
+step_desktop() {
+    DESKTOP_ENV=$($DIALOG --stdout \
+        --title "🖥️ Masaüstü Ortamı" \
+        --backtitle "Botan Linux - Hardcore Distribution" \
+        --menu "\nMasaüstü ortamınızı seçin:" 22 70 10 \
+        "kde" " KDE Plasma - Modern ve özelleştirilebilir" \
+        "gnome" " GNOME - Basit ve şık" \
+        "xfce" " XFCE - Hafif ve klasik" \
+        "mate" " MATE - Geleneksel" \
+        "cinnamon" " Cinnamon - Kullanıcı dostu" \
+        "lxqt" " LXQt - Ultra hafif" \
+        "i3" " i3wm - Tiling window manager" \
+        "sway" " Sway - Wayland tiling WM" \
+        "none" " ⚙️  Masaüstü Yok (Server/Minimal)" \
+        "custom" " 🔧 Özel (Sonra kur)") || exit 1
+
+    # Additional desktop options based on selection
+    case $DESKTOP_ENV in
+        kde)
+            EXTRA_PACKAGES="dolphin konsole kate ark gwenview"
+            ;;
+        gnome)
+            EXTRA_PACKAGES="nautilus gnome-terminal gedit"
+            ;;
+        xfce)
+            EXTRA_PACKAGES="thunar xfce4-terminal mousepad"
+            ;;
+        i3|sway)
+            EXTRA_PACKAGES="alacritty rofi waybar"
+            ;;
+        none)
+            EXTRA_PACKAGES=""
+            ;;
+    esac
+
+    success_msg "Masaüstü: ${DESKTOP_ENV^^}"
+}
+
+# --- STEP 6: DISK PARTITION ---
+
+step_disk_partition() {
+    # Get disk list with model info
+    local disk_info=$(lsblk -p -n -o NAME,SIZE,MODEL -d 2>/dev/null | grep -E '^/dev')
+    
+    if [ -z "$disk_info" ]; then
+        error_exit "Hiç disk bulunamadı!"
+    fi
+
+    # Create menu items
+    local menu_items=""
+    while IFS= read -r line; do
+        local disk=$(echo "$line" | awk '{print $1}')
+        local size=$(echo "$line" | awk '{print $2}')
+        local model=$(echo "$line" | awk '{$1=""; $2=""; print substr($0,3)}')
+        menu_items="$menu_items $disk \"$size - $model\""
+    done <<< "$disk_info"
+
+    # Disk selection
+    eval $DIALOG --title \"💾 Disk Seçimi\" \
+            --backtitle \"Botan Linux - Hardcore Distribution\" \
+            --colors --menu \"\n\Z1⚠️  UYARI: Seçilen diskteki tüm veriler silinecek!\Zn\nKurulum yapılacak diski seçin:\" 20 75 5 $menu_items 2>$TEMPFILE || exit 1
+    
+    TARGET_DISK=$(cat $TEMPFILE)
+
+    # Show disk info
+    local disk_model=$(lsblk -d -o MODEL "$TARGET_DISK" -n 2>/dev/null)
+    local disk_size=$(lsblk -d -o SIZE "$TARGET_DISK" -n 2>/dev/null)
+    local disk_type=$(lsblk -d -o ROTA "$TARGET_DISK" -n 2>/dev/null | grep -q 0 && echo "SSD/NVMe" || echo "HDD")
+    
+    $DIALOG --title "💾 Disk Bilgisi" \
+            --backtitle "Botan Linux - Hardcore Distribution" \
+            --msgbox "\nSeçilen Disk: $TARGET_DISK\nModel: $disk_model\nKapasite: $disk_size\nTür: $disk_type" 12 50
+
+    # Confirm disk selection
+    $DIALOG --title "⚠️ Onay Gerekli" \
+            --backtitle "Botan Linux - Hardcore Distribution" \
+            --colors \
+            --yesno "\n\Z1Seçilen disk: $TARGET_DISK ($disk_size)\Zn\n\nBu diskteki \ZbTÜM VERİLER SİLİNECEK!\Zn\n\nDevam etmek istediğinize emin misiniz?" 12 65 || exit 1
+
+    # Partition method
+    local part_method=$($DIALOG --stdout \
+        --title "📋 Bölümleme Yöntemi" \
+        --backtitle "Botan Linux - Hardcore Distribution" \
+        --menu "\nBölümleme yöntemini seçin:" 17 65 4 \
+        "auto" "Otomatik (Tüm disk silinir)" \
+        "manual" "Manuel (cfdisk ile)" \
+        "existing" "Mevcut Bölümü Kullan") || exit 1
+
+    case $part_method in
+        auto)
+            # Swap size selection
+            local ram_size=$(free -g | awk '/^Mem:/{print $2}')
+            local swap_default=$((ram_size + 1))
+            
+            SWAP_SIZE=$($DIALOG --stdout \
+                --title "💾 Swap Boyutu" \
+                --backtitle "Botan Linux - Hardcore Distribution" \
+                --inputbox "\nSwap boyutunu girin (GB):\n(Bellek: ${ram_size}GB, Önerilen: ${swap_default}GB)\n(0 = Swap yok)" 12 55 "$swap_default") || SWAP_SIZE="$swap_default"
+
+            # Automatic partitioning with progress
+            (
+                echo 5
+                echo "XXX\nDisk bilgileri okunuyor...\nXXX"
+                sleep 1
+                
+                echo 15
+                echo "XXX\nDisk imzaları temizleniyor...\nXXX"
+                wipefs -a $TARGET_DISK 2>/dev/null || true
+                sleep 1
+                
+                echo 25
+                echo "XXX\nGPT bölüm tablosu oluşturuluyor...\nXXX"
+                parted -s $TARGET_DISK mklabel gpt 2>/dev/null
+                sleep 1
+                
+                echo 40
+                echo "XXX\nBoot bölümü oluşturuluyor (512MB)...\nXXX"
+                parted -s $TARGET_DISK mkpart ESP fat32 1MiB 513MiB 2>/dev/null
+                parted -s $TARGET_DISK set 1 esp on 2>/dev/null
+                sleep 1
+                
+                echo 55
+                echo "XXX\nRoot bölümü oluşturuluyor...\nXXX"
+                if [ "$SWAP_SIZE" -gt 0 ]; then
+                    local swap_mb=$((SWAP_SIZE * 1024))
+                    parted -s $TARGET_DISK mkpart primary ext4 513MiB -${swap_mb}MiB 2>/dev/null
+                    parted -s $TARGET_DISK mkpart primary linux-swap -${swap_mb}MiB 100% 2>/dev/null
+                else
+                    parted -s $TARGET_DISK mkpart primary ext4 513MiB 100% 2>/dev/null
+                fi
+                sleep 2
+                
+                echo 70
+                echo "XXX\nBoot bölümü biçimlendiriliyor...\nXXX"
+                local boot_part="${TARGET_DISK}1"
+                mkfs.vfat -F32 "$boot_part" 2>/dev/null
+                sleep 1
+                
+                echo 80
+                echo "XXX\nRoot bölümü biçimlendiriliyor...\nXXX"
+                TARGET_PART="${TARGET_DISK}2"
+                mkfs.ext4 -F "$TARGET_PART" 2>/dev/null
+                sleep 1
+                
+                echo 90
+                if [ "$SWAP_SIZE" -gt 0 ]; then
+                    echo "XXX\nSwap bölümü hazırlanıyor...\nXXX"
+                    local swap_part="${TARGET_DISK}3"
+                    mkswap "$swap_part" 2>/dev/null
+                    SWAP_FILE="$swap_part"
+                fi
+                sleep 1
+                
+                echo 100
+                echo "XXX\n✅ Bölümleme tamamlandı!\nXXX"
+            ) | $DIALOG --title "💿 Disk Bölümleniyor" \
+                        --backtitle "Botan Linux - Hardcore Distribution" \
+                        --gauge "" 12 70 0
+            
+            TARGET_PART="${TARGET_DISK}2"
+            ;;
+            
+        manual)
+            # Manual partitioning with cfdisk
+            $DIALOG --title "📋 Manuel Bölümleme" \
+                    --msgbox "\ncfdisk açılacak.\n\nGPT bölüm tablosu seçin ve:\n• Boot bölümü (512MB, EFI System)\n• Root bölümü (Linux filesystem)\n• Swap bölümü (opsiyonel)\noluşturun.\n\n'Write' ile kaydedin." 15 55
+            
+            cfdisk $TARGET_DISK || true
+            
+            # Select root partition
+            local part_info=$(lsblk -p -n -o NAME,SIZE,TYPE $TARGET_DISK 2>/dev/null | grep part)
+            local part_menu=""
+            while IFS= read -r line; do
+                local p=$(echo "$line" | awk '{print $1}')
+                local s=$(echo "$line" | awk '{print $2}')
+                part_menu="$part_menu $p \"$s\""
+            done <<< "$part_info"
+            
+            eval $DIALOG --title \"📋 Root Bölümü Seçimi\" \
+                    --backtitle \"Botan Linux - Hardcore Distribution\" \
+                    --menu \"\nRoot bölümünü seçin:\" 15 60 3 $part_menu 2>$TEMPFILE || exit 1
+            
+            TARGET_PART=$(cat $TEMPFILE)
+            
+            # Format options
+            local fs_type=$($DIALOG --stdout \
+                --title "💿 Dosya Sistemi" \
+                --backtitle "Botan Linux - Hardcore Distribution" \
+                --menu "\n$TARGET_PART için dosya sistemi:" 12 55 3 \
+                "ext4" "ext4 (Önerilen)" \
+                "btrfs" "Btrfs (Snapshot desteği)" \
+                "xfs" "XFS (Büyük diskler)") || fs_type="ext4"
+            
+            $DIALOG --title "💿 Biçimlendirme" \
+                    --yesno "\n$TARGET_PART $fs_type olarak biçimlendirilsin mi?" 8 55 || exit 1
+            
+            mkfs.$fs_type -F $TARGET_PART 2>/dev/null || mkfs.ext4 -F $TARGET_PART
+            ;;
+            
+        existing)
+            # Use existing partition
+            local all_parts=$(lsblk -p -n -o NAME,SIZE,TYPE 2>/dev/null | grep part)
+            local part_menu=""
+            while IFS= read -r line; do
+                local p=$(echo "$line" | awk '{print $1}')
+                local s=$(echo "$line" | awk '{print $2}')
+                part_menu="$part_menu $p \"$s\""
+            done <<< "$all_parts"
+            
+            eval $DIALOG --title \"📋 Bölüm Seçimi\" \
+                    --backtitle \"Botan Linux - Hardcore Distribution\" \
+                    --menu \"\nKullanılacak bölümü seçin:\" 15 60 5 $part_menu 2>$TEMPFILE || exit 1
+            
+            TARGET_PART=$(cat $TEMPFILE)
+            
+            # Ask to format
+            $DIALOG --title "💿 Biçimlendirme" \
+                    --yesno "\n$TARGET_PART biçimlendirilsin mi?\n(Hayır = Mevcut verileri koru)" 9 55 || true
+            
+            if [ $? -eq 0 ]; then
+                mkfs.ext4 -F $TARGET_PART
+            fi
+            ;;
+    esac
+
+    success_msg "Disk: $TARGET_DISK\nBölüm: $TARGET_PART"
+}
+
+# --- STEP 7: ADDITIONAL PACKAGES ---
+
+step_extra_packages() {
+    local add_packages=$($DIALOG --stdout \
+        --title "📦 Ek Paketler" \
+        --backtitle "Botan Linux - Hardcore Distribution" \
+        --checklist "\nEk paketler seçin (boşluk ile işaretleyin):" 22 70 12 \
+        "firefox" "Firefox Web Tarayıcı" off \
+        "chromium" "Chromium Web Tarayıcı" off \
+        "libreoffice" "LibreOffice Ofis Paketi" off \
+        "vlc" "VLC Medya Oynatıcı" off \
+        "gimp" "GIMP Resim Düzenleyici" off \
+        "inkscape" "Inkscape Vektör Grafik" off \
+        "obs-studio" "OBS Studio (Yayın/Kayıt)" off \
+        "steam" "Steam (Oyun Platformu)" off \
+        "code" "VS Code Editör" off \
+        "git" "Git Versiyon Kontrol" on \
+        "base-devel" "Derleme Araçları" on \
+        "htop" "Htop Sistem İzleme" on) || EXTRA_PACKAGES="$EXTRA_PACKAGES"
+
+    # Add selected packages to EXTRA_PACKAGES
+    if [ -n "$add_packages" ]; then
+        EXTRA_PACKAGES="$EXTRA_PACKAGES $(echo $add_packages | tr -d '"')"
+    fi
+}
+
+# --- STEP 8: NETWORK CONFIGURATION ---
+
+step_network() {
+    local net_type=$($DIALOG --stdout \
+        --title "🌐 Ağ Yapılandırması" \
+        --backtitle "Botan Linux - Hardcore Distribution" \
+        --menu "\nAğ yapılandırma yöntemini seçin:" 12 55 3 \
+        "dhcp" "Otomatik (DHCP) - Önerilen" \
+        "manual" "Manuel IP Yapılandırması" \
+        "skip" "Yapılandırma (Sonra)") || net_type="dhcp"
+    
+    # Manual configuration if selected
+    if [ "$net_type" = "manual" ]; then
+        local ip_addr=$($DIALOG --stdout \
+            --title "🌐 IP Adresi" \
+            --inputbox "\nIP adresi girin (örn: 192.168.1.100/24):" 10 55) || ip_addr=""
+        
+        local gateway=$($DIALOG --stdout \
+            --title "🌐 Ağ Geçidi" \
+            --inputbox "\nAğ geçidini girin (örn: 192.168.1.1):" 10 55) || gateway=""
+        
+        local dns=$($DIALOG --stdout \
+            --title "🌐 DNS Sunucuları" \
+            --inputbox "\nDNS sunucularını girin (örn: 8.8.8.8,8.8.4.4):" 10 55) || dns=""
+        
+        # Store for later use
+        NET_IP="$ip_addr"
+        NET_GATEWAY="$gateway"
+        NET_DNS="$dns"
+    fi
+}
+
+# --- STEP 9: SUMMARY ---
+
+step_summary() {
+    local summary="
+\Zb\Z2═══════════════════════════════════════════════
+          📋 KURULUM ÖZETİ
+═══════════════════════════════════════════════\Zn
+
+\Zb👤 Kullanıcı Bilgileri:\Zn
+   Kullanıcı Adı:  $USERNAME
+   Makine Adı:     $HOST_NAME
+
+\Zb🌐 Dil ve Konum:\Zn
+   Dil:            $LANGUAGE ($LOCALE)
+   Klavye:         $KEYBOARD_LAYOUT $KEYBOARD_VARIANT
+   Saat Dilimi:    $TIMEZONE
+
+\Zb🖥️  Masaüstü:\Zn
+   Ortam:          ${DESKTOP_ENV^^}
+
+\Zb💾 Disk Bilgileri:\Zn
+   Hedef Disk:     $TARGET_DISK
+   Root Bölümü:    $TARGET_PART
+   Swap:           ${SWAP_SIZE}GB
+
+\Zb📦 Kurulum:\Zn
+   Bootloader:     Limine (BIOS/UEFI)
+   Dosya Sistemi:  ext4
+
+\Z1═══════════════════════════════════════════════\Zn
+\Z1⚠️  DİKKAT: Kurulum başladığında iptal edilemez!\Zn
+\Z1   Seçilen diskteki tüm veriler silinecektir!\Zn
+\Z1═══════════════════════════════════════════════\Zn
+"
+
+    $DIALOG --title "📋 Kurulum Özeti - Son Onay" \
+            --backtitle "Botan Linux - Hardcore Distribution" \
+            --colors \
+            --yesno "$summary" 30 78 || exit 1
+}
+
+# --- STEP 10: INSTALLATION ---
+
+fetch_file() {
+    local source_url=$1
+    local filename=$2
+    local target=$3
+    curl -sL "${source_url}/$filename" -o "$target" 2>/dev/null
+}
+
+step_install() {
+    (
+        # Prepare mount point
+        echo 2
+        echo "XXX\nBağlantı noktası hazırlanıyor...\nXXX"
+        mkdir -p /mnt/boot 2>/dev/null || true
+        sleep 1
+        
+        # Mount partition
+        echo 5
+        echo "XXX\nRoot bölümü bağlanıyor...\nXXX"
+        mount $TARGET_PART /mnt 2>/dev/null || error_exit "Bölüm bağlanamadı!"
+        sleep 1
+
+        # Mount boot partition for UEFI
+        echo 8
+        echo "XXX\nBoot bölümü bağlanıyor...\nXXX"
+        local boot_part="${TARGET_DISK}1"
+        if [ -b "$boot_part" ]; then
+            mkdir -p /mnt/boot/efi 2>/dev/null || true
+            mount "$boot_part" /mnt/boot/efi 2>/dev/null || mount "$boot_part" /mnt/boot 2>/dev/null || true
+        fi
+        sleep 1
+
+        # USB LIVE SİSTEMDEN TEMEL DOSYALARI KOPYALA
+        echo 12
+        echo "XXX\nUSB'den sistem dosyaları kopyalanıyor...\n(Bu işlem birkaç dakika sürebilir)\nXXX"
+        if [ -d "$USB_ROOT" ]; then
+            # Tüm sistemi USB'den diske kopyala
+            # ISO'ya özel dosyaları Hariç TUT (bunlar silinecek/exclude)
+            rsync -aAX --info=progress2 \
+                --exclude="/dev/*" --exclude="/proc/*" --exclude="/sys/*" \
+                --exclude="/tmp/*" --exclude="/run/*" --exclude="/mnt/*" \
+                --exclude="/media/*" --exclude="/lost+found" \
+                --exclude="/usr/bin/botan-installer" \
+                --exclude="/usr/bin/botan" \
+                --exclude="/usr/bin/mkarchiso" \
+                --exclude="/etc/systemd/system/getty@tty1.service.d/autologin.conf" \
+                --exclude="/etc/motd" \
+                --exclude="/etc/sudoers.d/grml" \
+                --exclude="/var/cache/pacman/pkg/*" \
+                --exclude="/var/lib/pacman/sync/*.db" \
+                --exclude="/var/log/pacman.log" \
+                --exclude="/boot/memtest86+" \
+                "$USB_ROOT/" "/mnt/" 2>/dev/null || true
+        fi
+        sleep 1
+        
+        # Kopyalama sonrası ek temizlik (geri kalan ISO artifact'leri)
+        echo 18
+        echo "XXX\nISO artifact'leri temizleniyor...\nXXX"
+        rm -rf /mnt/usr/bin/botan-installer 2>/dev/null || true
+        rm -rf /mnt/usr/bin/botan 2>/dev/null || true
+        rm -rf /mnt/usr/bin/mkarchiso 2>/dev/null || true
+        rm -rf /mnt/etc/systemd/system/getty@tty1.service.d/autologin.conf 2>/dev/null || true
+        rm -rf /mnt/etc/motd 2>/dev/null || true
+        rm -rf /mnt/etc/sudoers.d/grml 2>/dev/null || true
+        rm -rf /mnt/var/cache/pacman/pkg/* 2>/dev/null || true
+        rm -rf /mnt/var/lib/pacman/sync/*.db 2>/dev/null || true
+        rm -rf /mnt/var/log/pacman.log 2>/dev/null || true
+        rm -rf /mnt/tmp/* 2>/dev/null || true
+        rm -rf /mnt/boot/memtest86+ 2>/dev/null || true
+        sleep 1
+
+        # Install additional packages with pacstrap
+        echo 25
+        echo "XXX\nEk paketler yükleniyor...\n(pacstrap çalışıyor)\nXXX"
+        
+        # Sadece USB'de olmayan paketleri kur
+        # Desktop environment ve ek paketler
+        local extra_packages=""
+        
+        case $DESKTOP_ENV in
+            kde)    extra_packages="plasma konsole dolphin" ;;
+            gnome)  extra_packages="gnome gnome-terminal nautilus" ;;
+            xfce)   extra_packages="xfce4 xfce4-goodies" ;;
+            mate)   extra_packages="mate mate-extra" ;;
+            cinnamon) extra_packages="cinnamon" ;;
+            lxqt)   extra_packages="lxqt" ;;
+            i3)     extra_packages="i3-wm i3status dmenu" ;;
+            sway)   extra_packages="sway waybar" ;;
+        esac
+        
+        # Add extra packages
+        if [ -n "$EXTRA_PACKAGES" ]; then
+            extra_packages="$extra_packages $EXTRA_PACKAGES"
+        fi
+        
+        # Pacstrap ile sadece ek paketleri kur
+        if [ -n "$extra_packages" ]; then
+            pacstrap /mnt $extra_packages 2>&1 || true
+        fi
+
+        # Generate fstab
+        echo 35
+        echo "XXX\nfstab oluşturuluyor...\nXXX"
+        genfstab -U /mnt >> /mnt/etc/fstab
+        
+        # Add swap to fstab if exists
+        if [ -n "$SWAP_FILE" ] && [ -b "$SWAP_FILE" ]; then
+            local swap_uuid=$(blkid -s UUID -o value $SWAP_FILE)
+            echo "UUID=$swap_uuid none swap defaults 0 0" >> /mnt/etc/fstab
+        fi
+        sleep 1
+
+        # Fetch configuration files
+        echo 40
+        echo "XXX\nYapılandırma dosyaları indiriliyor...\nXXX"
+        mkdir -p /mnt/etc /mnt/boot 2>/dev/null
+        
+        # From config folder
+        fetch_file "$CONFIG_URL" "os-release" "/mnt/etc/os-release"
+        fetch_file "$CONFIG_URL" "pacman.conf" "/mnt/etc/pacman.conf"
+        
+        sleep 1
+
+        # System configuration
+        echo 50
+        echo "XXX\nSistem ayarları yapılandırılıyor...\nXXX"
+        
+        # Hostname
+        echo "$HOST_NAME" > /mnt/etc/hostname
+        
+        # Hosts file
+        cat > /mnt/etc/hosts << EOF
+127.0.0.1   localhost
+::1         localhost
+127.0.1.1   $HOST_NAME.localdomain $HOST_NAME
+EOF
+        
+        # Locale
+        echo "$LOCALE UTF-8" >> /mnt/etc/locale.gen
+        echo "LANG=$LOCALE" > /mnt/etc/locale.conf
+        echo "KEYMAP=$KEYBOARD_LAYOUT" > /mnt/etc/vconsole.conf
+        
+        # Timezone
+        ln -sf /usr/share/zoneinfo/$TIMEZONE /mnt/etc/localtime
+        
+        # Enable services
+        echo 55
+        echo "XXX\nServisler etkinleştiriliyor...\nXXX"
+        sleep 1
+
+        # User creation in chroot
+        echo 60
+        echo "XXX\nKullanıcı oluşturuluyor...\nXXX"
+        
+        arch-chroot /mnt bash -c "
+            # Set root password
+            echo 'root:$ROOT_PASS' | chpasswd
+            
+            # Create user
+            useradd -m -G wheel,video,audio,storage -s /bin/bash $USERNAME
+            echo '$USERNAME:$USER_PASS' | chpasswd
+            
+            # Enable sudo for wheel group
+            sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
+            
+            # Generate locale
+            locale-gen
+            
+            # Enable NetworkManager
+            systemctl enable NetworkManager
+            
+            # Enable display manager based on desktop
+            case '$DESKTOP_ENV' in
+                kde)    systemctl enable sddm ;;
+                gnome)  systemctl enable gdm ;;
+                xfce|mate|cinnamon|lxqt) systemctl enable lightdm || true ;;
+            esac
+        "
+        sleep 1
+
+        # Bootloader installation
+        echo 75
+        echo "XXX\nGRUB bootloader kuruluyor...\nXXX"
+        
+        # GRUB kurulumu - chroot içinde
+        arch-chroot /mnt bash -c "
+            # BIOS kurulumu
+            if [ -d /sys/firmware/efi ]; then
+                # UEFI
+                grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=Botan --recheck
+            else
+                # BIOS
+                grub-install --target=i386-pc $TARGET_DISK
+            fi
+            
+            # GRUB yapılandırması oluştur
+            grub-mkconfig -o /boot/grub/grub.cfg
+        " 2>/dev/null || true
+        
+        sleep 1
+
+        # USB'DEN TÜM ÖNEMLİ DOSYALARI KOPYALA
+        echo 82
+        echo "XXX\nUSB Live sistemden dosyalar kopyalanıyor...\nXXX"
+        
+        # USB airootfs'ten rsync ile kopyala (eğer mevcutsa)
+        if [ -d "$USB_ROOT" ]; then
+            # Temel sistem dosyaları
+            rsync -a --exclude="/dev/*" --exclude="/proc/*" --exclude="/sys/*" \
+                  --exclude="/tmp/*" --exclude="/run/*" --exclude="/mnt/*" \
+                  --exclude="/media/*" --exclude="/lost+found" \
+                  "$USB_ROOT/usr/share/" "/mnt/usr/share/" 2>/dev/null || true
+            rsync -a "$USB_ROOT/usr/lib/" "/mnt/usr/lib/" 2>/dev/null || true
+            rsync -a "$USB_ROOT/usr/bin/" "/mnt/usr/bin/" 2>/dev/null || true
+            rsync -a "$USB_ROOT/usr/libexec/" "/mnt/usr/libexec/" 2>/dev/null || true
+        fi
+        
+        # USB'den özel dosyalar
+        for dir in wallpapers themes icons fonts backgrounds botan sounds; do
+            [ -d "/usr/share/$dir" ] && cp -r "/usr/share/$dir" "/mnt/usr/share/" 2>/dev/null || true
+        done
+        
+        # Özel scriptler
+        for script in botan-installer botan-welcome botan-settings botan-update; do
+            [ -f "/usr/bin/$script" ] && cp "/usr/bin/$script" "/mnt/usr/bin/" 2>/dev/null || true
+        done
+        
+        # /etc/skel - kullanıcı şablonları
+        if [ -d /etc/skel ]; then
+            cp -r /etc/skel/* "/mnt/home/$USERNAME/" 2>/dev/null || true
+            cp -r /etc/skel/.config "/mnt/home/$USERNAME/" 2>/dev/null || true
+            cp -r /etc/skel/.local "/mnt/home/$USERNAME/" 2>/dev/null || true
+            chown -R 1000:1000 "/mnt/home/$USERNAME" 2>/dev/null || true
+        fi
+        
+        # /etc özel config dosyaları
+        for file in doas.conf mkinitcpio.conf locale.gen vconsole.conf; do
+            [ -f "/etc/$file" ] && cp "/etc/$file" "/mnt/etc/$file" 2>/dev/null || true
+        done
+        for dir in modprobe.d modules-load.d sysctl.d X11 xdg; do
+            [ -d "/etc/$dir" ] && cp -r "/etc/$dir" "/mnt/etc/" 2>/dev/null || true
+        done
+        
+        # /opt özel programlar
+        [ -d /opt ] && cp -r /opt/* /mnt/opt/ 2>/dev/null || true
+        
+        # /usr/lib önemli dosyalar
+        for dir in firmware modules modprobe.d; do
+            [ -d "/usr/lib/$dir" ] && cp -r "/usr/lib/$dir" "/mnt/usr/lib/" 2>/dev/null || true
+        done
+        
+        # Var壁纸 ve temalar
+        [ -d /var/lib ] && cp -r /var/lib/* /mnt/var/lib/ 2>/dev/null || true
+        
+        sleep 1
+
+        # Final setup
+        echo 95
+        echo "XXX\nSon yapılandırmalar yapılıyor...\nXXX"
+        
+        # Create initramfs
+        arch-chroot /mnt mkinitcpio -P 2>/dev/null || true
+        
+        # Sync
+        sync
+        
+        sleep 1
+
+        echo 100
+        echo "XXX\n✅ Kurulum tamamlandı!\nXXX"
+        sleep 2
+        
+    ) | $DIALOG --title "🌿 Botan Linux Kuruluyor" \
+                --backtitle "Botan Linux - Hardcore Distribution" \
+                --gauge "" 12 70 0
+}
+
+# --- STEP 11: FINISH ---
+
+step_finish() {
+    local finish_title msg_complete msg_info msg_next msg_help msg_reboot
+    local msg_project msg_discord msg_bugreport
+    
+    case $INSTALLER_LANG in
+        tr)
+            finish_title="🌿 Kurulum Tamamlandı!"
+            msg_complete="🎉 Kurulum başarıyla tamamlandı!"
+            msg_info="📋 Kurulum Bilgileri:"
+            msg_next="🔄 Sonraki Adımlar:"
+            msg_help="🔗 Bağlantılar:"
+            msg_reboot="🔄 Yeniden Başlat"
+            msg_reboot_msg="Sistemi şimdi yeniden başlatmak istiyor musunuz?"
+            msg_project="📦 Proje Kaynak Kodu"
+            msg_discord="💬 Discord Sunucumuz"
+            msg_bugreport="🐛 Hata Bildir"
+            ;;
+        en)
+            finish_title="🌿 Installation Complete!"
+            msg_complete="🎉 Installation completed successfully!"
+            msg_info="📋 Installation Info:"
+            msg_next="🔄 Next Steps:"
+            msg_help="🔗 Links:"
+            msg_reboot="🔄 Reboot"
+            msg_reboot_msg="Do you want to reboot the system now?"
+            msg_project="📦 Project Source Code"
+            msg_discord="💬 Discord Server"
+            msg_bugreport="🐛 Report a Bug"
+            ;;
+        de)
+            finish_title="🌿 Installation abgeschlossen!"
+            msg_complete="🎉 Installation erfolgreich abgeschlossen!"
+            msg_info="📋 Installationsinformationen:"
+            msg_next="🔄 Nächste Schritte:"
+            msg_help="🔗 Links:"
+            msg_reboot="🔄 Neustart"
+            msg_reboot_msg="Möchten Sie das System jetzt neu starten?"
+            msg_project="📦 Projektquellcode"
+            msg_discord="💬 Discord Server"
+            msg_bugreport="🐛 Fehler melden"
+            ;;
+    esac
+    
+    $DIALOG --title "$finish_title" \
+            --backtitle "Botan Linux - Hardcore Distribution" \
+            --colors \
+            --msgbox "
+
+\Zb\Z2  ╔═══════════════════════════════════════════════════╗
+  ║                                                    ║
+  ║     🌿  BOTAN LINUX  🌿                           ║
+  ║                                                    ║
+  ╚═══════════════════════════════════════════════════╝\Zn
+
+\Zb$msg_complete\Zn
+
+\Zb$msg_info\Zn
+   • Username:  $USERNAME
+   • Hostname: $HOST_NAME
+   • Desktop:  ${DESKTOP_ENV^^}
+   • Disk:        $TARGET_DISK
+
+\Zb$msg_next\Zn
    1. Remove USB
    2. Reboot: \Zbreboot\Zn
    3. Login as $USERNAME
